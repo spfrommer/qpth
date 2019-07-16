@@ -20,7 +20,7 @@ us = torch.tensor([[2.0]])
 class PhysicsNet(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.mu = Parameter(torch.tensor([1.0]))
+        self.mu = Parameter(torch.tensor([0.2]))
 
     def forward(self, vk):
         mu = self.mu
@@ -60,12 +60,37 @@ class PhysicsNet(torch.nn.Module):
         # But again doesn't work for some reason
         cost = 0.5 * torch.matmul(z, torch.matmul(Q, z.transpose(0, 1))) \
                 + torch.matmul(p, z.transpose(0, 1)) + a1 * beta**2
-        pdb.set_trace()
-        return x
+
+        error = beta - z[0][0] + z[0][1]
+        return error
 
 # print(QPFunction()(2.0 * torch.tensor([[1.0]]), torch.tensor([1.0]), 
                    # torch.tensor([[1.0]]), torch.tensor([5.0]), 
                    # torch.tensor([]), torch.tensor([])))
 
 net = PhysicsNet()
-print(net.forward(prev_vels))
+
+loss_func = torch.nn.MSELoss()
+optimizer = torch.optim.Adam(net.parameters(), lr=0.5)
+
+for epoch in range(500):
+    # Zero the gradients
+    optimizer.zero_grad()
+
+    error = net(prev_vels)
+
+    loss = torch.norm(error, 2)
+    print('epoch: ', epoch,' loss: ', loss.item(), ' mu: ', net.mu.item())
+    
+    # perform a backward pass (backpropagation)
+    loss.backward()
+    
+    # Update the parameters
+    # optimizer.step()
+    for p in net.parameters():
+        if p.requires_grad:
+            p.data.add_(0.1, -p.grad.data)
+    
+    # Needed to recreate the backwards graph
+    # TODO: fix this properly
+    #net.lcp_solver = LCPFunction()
