@@ -4,6 +4,7 @@ from enum import Enum
 
 from qpth.util import get_sizes, bdiag
 
+import pdb
 
 def lu_hack(x):
     data, pivots = x.lu(pivot=not x.is_cuda)
@@ -391,7 +392,7 @@ a non-zero diagonal.
     # that can be completed once D^{-1} is known.
     # See the 'Block LU factorization' part of our website
     # for more details.
-
+    
     G_invQ_GT = torch.bmm(G, G.transpose(1, 2).lu_solve(*Q_LU))
     R = G_invQ_GT.clone()
     S_LU_pivots = torch.IntTensor(range(1, 1 + neq + nineq)).unsqueeze(0) \

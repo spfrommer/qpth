@@ -9,6 +9,7 @@ from .solvers.pdipm import spbatch as pdipm_spb
 
 from enum import Enum
 
+import pdb
 
 class QPSolvers(Enum):
     PDIPM_BATCHED = 1
@@ -89,7 +90,7 @@ class QPFunction(Function):
                 e, _ = torch.eig(Q[i])
                 if not torch.all(e[:,0] > 0):
                     raise RuntimeError('Q is not SPD.')
-
+        
         _, nineq, nz = G.size()
         neq = A.size(1) if A.nelement() > 0 else 0
         assert(neq > 0 or nineq > 0)
