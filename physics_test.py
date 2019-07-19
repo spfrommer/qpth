@@ -8,6 +8,8 @@ from qpth.qp import QPFunction
 from qpth.qp import QPSolvers
 
 import numpy as np
+from scipy.optimize import minimize
+from scipy.optimize import LinearConstraint
 
 import pdb
 
@@ -18,11 +20,11 @@ us = torch.tensor([[2.0]])
 class PhysicsNet(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.mu = Parameter(torch.tensor([1.0]))
+        self.mu = Parameter(torch.tensor([0.1]))
 
     def forward(self, vk):
         mu = self.mu
-        mu = torch.tensor([1.0])
+        #mu = torch.tensor([1.0])
 
         beta = next_vels - vk - us
 
@@ -35,7 +37,7 @@ class PhysicsNet(torch.nn.Module):
         A = torch.tensor([[1.0, -1, 0], [-1, 1, 0], [0, 0, 0]])
         b = torch.tensor([-2 * beta, 2 * beta, 0])
 
-        a1 = 0
+        a1 = 1
         a2 = 1
 
         Q = 2 * a1 * A + 2 * a2 * G
@@ -49,28 +51,48 @@ class PhysicsNet(torch.nn.Module):
         R = torch.cat((R, -G))
         h = torch.cat((h.transpose(0, 1), f.unsqueeze(1)))
         h = h.transpose(0, 1)
+
+        Qmod = 0.5 * (Q + Q.transpose(0, 1)) + 0.0001 * torch.eye(3)
         
-        z = QPFunction(check_Q_spd=False)(Q, p, R, h, 
+        z = QPFunction(check_Q_spd=False)(Qmod, p, R, h, 
                 torch.tensor([]), torch.tensor([]))
-        z = torch.tensor([[0.0, 1, 2]])
-        assert(torch.all(torch.matmul(R, z.transpose(0, 1)) \
-                        <= (h.transpose(0, 1) + torch.ones(h.shape) * 1e-7)))
+
+        #print(self.scipy_optimize(0.5 * (Q + Q.transpose(0, 1)), p, R, h))
+        #assert(torch.all(torch.matmul(R, z.transpose(0, 1)) \
+        #                <= (h.transpose(0, 1) + torch.ones(h.shape) * 1e-5)))
 
         lcp_slack = torch.matmul(G, z.transpose(0, 1)).transpose(0, 1) + f
 
-        cost = 0.5 * torch.matmul(z, torch.matmul(Q, z.transpose(0, 1))) \
+        cost = 0.5 * torch.matmul(z, torch.matmul(Qmod, z.transpose(0, 1))) \
                 + torch.matmul(p, z.transpose(0, 1)) + a1 * beta**2
-        pdb.set_trace()
         return cost
 
-# print(QPFunction()(2.0 * torch.tensor([[1.0]]), torch.tensor([1.0]), 
-                   # torch.tensor([[1.0]]), torch.tensor([5.0]), 
-                   # torch.tensor([]), torch.tensor([])))
+    def scipy_optimize(self, Q, p, R, h):
+        Qnp = Q.numpy()
+        pnp = p.numpy()
+        Rnp = R.numpy()
+        hnp = h.numpy()
+
+        def fun(z):
+            return 0.5 * np.matmul(z, np.matmul(Q, z)) + np.matmul(p, z)
+        
+        linear_constraint = LinearConstraint(Rnp, 
+                [-np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf], hnp[0])
+        res = minimize(fun, [1, 1, 1], method='trust-constr', constraints=[linear_constraint])
+
+        return res.x
+
 
 net = PhysicsNet()
 
+#print(QPFunction()(torch.tensor([[1.0]]), torch.tensor([1.0]), 
+#                torch.tensor([[1.0]]), torch.tensor([5.0]), 
+#                torch.tensor([]), torch.tensor([])))
+#print(net.scipy_optimize(torch.tensor([[1.0]]), torch.tensor([[1.0]]), 
+#                torch.tensor([1.0]), torch.tensor([[5.0]])))
+
 loss_func = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(net.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(net.parameters(), lr=0.1)
 
 for epoch in range(10000):
     # Zero the gradients
@@ -86,11 +108,7 @@ for epoch in range(10000):
     loss.backward()
     
     # Update the parameters
-    # optimizer.step()
+    #optimizer.step()
     for p in net.parameters():
         if p.requires_grad:
             p.data.add_(0.01, -p.grad.data)
-    
-    # Needed to recreate the backwards graph
-    # TODO: fix this properly
-    #net.lcp_solver = LCPFunction()
