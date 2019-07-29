@@ -13,20 +13,21 @@ from scipy.optimize import LinearConstraint
 
 import pdb
 
-prev_vels = torch.tensor([[1.0]])
-next_vels = torch.tensor([[2.0]])
-us = torch.tensor([[2.0]])
-
 class PhysicsNet(torch.nn.Module):
     def __init__(self, startmu):
         super().__init__()
         self.mu = Parameter(torch.tensor([startmu]))
 
-    def forward(self, vk):
+    def forward(self, data):
+        n = data.shape[0]
+        vs = torch.unsqueeze(data[:, 0], 1)
+        vnexts = torch.unsqueeze(data[:, 1], 1)
+        us = torch.unsqueeze(data[:, 2], 1)
+
         mu = self.mu
         #mu = torch.tensor([1.0])
 
-        beta = next_vels - vk - us
+        beta = vnexts - vs - us
 
         G = torch.tensor([[1.0, -1, 1], [-1, 1, 1], [-1, -1, 0]])
 
@@ -37,11 +38,13 @@ class PhysicsNet(torch.nn.Module):
                               [0, 0, 0, 0, 0, 0],
                               [0, 0, 0, 0, 0, 0]])
         
-        f = torch.matmul(torch.tensor([[1.0, 1, 0], 
-                                       [-1, -1, 0],
-                                       [0, 0, 1]]),
-                torch.cat((vk[0], us[0], mu)))
-        fpad = torch.cat((f, torch.zeros(3)))
+        fmats = torch.tensor([[1.0, 1, 0], 
+                              [-1, -1, 0],
+                              [0, 0, 1]]).unsqueeze(0).repeat(n, 1, 1)
+        fvecs = torch.cat((vs, us, mu * torch.ones(vs.shape)), 1).unsqueeze(2)
+        f = torch.bmm(fmats, fvecs)
+        batch_zeros = torch.zeros(f.shape)
+        fpad = torch.cat((f, batch_zeros), 1)
         
         # For prediction error
         A = torch.tensor([[1.0, -1, 0, 0, 0, 0],
@@ -49,16 +52,18 @@ class PhysicsNet(torch.nn.Module):
                           [0, 0, 0, 0, 0, 0],
                           [0, 0, 0, 0, 0, 0],
                           [0, 0, 0, 0, 0, 0],
-                          [0, 0, 0, 0, 0, 0]])
-        b = torch.tensor([-2 * beta, 2 * beta, 0, 0, 0, 0])
+                          [0, 0, 0, 0, 0, 0]]).repeat(n, 1, 1)
+        beta_zeros = torch.zeros(beta.shape)
+        b = torch.cat((-2 * beta, 2 * beta, beta_zeros, beta_zeros, beta_zeros, beta_zeros), 1).unsqueeze(2)
         
-        slack_penalty = torch.tensor([[0.0, 0, 0, 1, 1, 1]])
+        slack_penalty = torch.tensor([0.0, 0, 0, 1, 1, 1]).repeat(n, 1).unsqueeze(2)
 
         a1 = 1
         a2 = 1
         a3 = 1
 
         Q = 2 * a1 * A + 2 * a2 * Gpad
+        pdb.set_trace()
         p = a1 * b + a2 * fpad + a3 * slack_penalty
         
         # Constrain lambda and slacks to be >= 0
@@ -83,6 +88,7 @@ class PhysicsNet(torch.nn.Module):
         #                <= (h.transpose(0, 1) + torch.ones(h.shape) * 1e-5)))
 
         lcp_slack = torch.matmul(Gpad, z.transpose(0, 1)).transpose(0, 1) + fpad
+        #print(z[0])
 
         cost = 0.5 * torch.matmul(z, torch.matmul(Qmod, z.transpose(0, 1))) \
                 + torch.matmul(p, z.transpose(0, 1)) + a1 * beta**2
@@ -111,10 +117,13 @@ class PhysicsNet(torch.nn.Module):
 #print(net.scipy_optimize(torch.tensor([[1.0]]), torch.tensor([[1.0]]), 
 #                torch.tensor([1.0]), torch.tensor([[5.0]])))
 
+# Previous vel, next vel, u
+data = torch.tensor([[1.0, 2.0, 2.0],
+                     [2.0, 2.0, 1.0]])
 
 evolutions = []
-#for startmu in np.linspace(0.1, 5, num=20):
-for startmu in [7.0]:
+#for startmu in np.linspace(0.1, 10, num=30):
+for startmu in [4.]:
     net = PhysicsNet(startmu)
 
     loss_func = torch.nn.MSELoss()
@@ -125,7 +134,7 @@ for startmu in [7.0]:
         # Zero the gradients
         optimizer.zero_grad()
 
-        error = net(prev_vels)
+        error = net(data)
 
         loss = torch.norm(error, 2)
         evolution.append([epoch, net.mu.item()])
